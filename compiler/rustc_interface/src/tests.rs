@@ -9,6 +9,7 @@ use rustc_data_structures::profiling::TimePassesFormat;
 use rustc_errors::ColorConfig;
 use rustc_errors::emitter::HumanReadableErrorType;
 use rustc_hir::attrs::{CollapseMacroDebuginfo, NativeLibKind};
+use rustc_lint_defs::Level;
 use rustc_session::config::{
     AnnotateMoves, AutoDiff, BranchProtection, CFGuard, Cfg, CodegenRetagOptions, CoverageLevel,
     CoverageOptions, DebugInfo, DumpMonoStatsFormat, ErrorOutputType, ExternEntry, ExternLocation,
@@ -19,7 +20,6 @@ use rustc_session::config::{
     Polonius, ProcMacroExecutionStrategy, Strip, SwitchWithOptPath, SymbolManglingVersion,
     WasiExecModel, build_configuration, build_session_options, rustc_optgroups,
 };
-use rustc_session::lint::Level;
 use rustc_session::search_paths::SearchPath;
 use rustc_session::utils::{CanonicalizedPath, NativeLib};
 use rustc_session::{CompilerIO, EarlyDiagCtxt, Session, build_session, getopts};
@@ -852,7 +852,13 @@ fn test_unstable_options_tracking_hash() {
     tracked!(mir_opt_level, Some(4));
     tracked!(mir_preserve_ub, true);
     tracked!(move_size_limit, Some(4096));
-    tracked!(next_solver, NextSolverConfig { coherence: true, globally: true });
+
+    // tidy-alphabetical-end
+    // FIXME(#160895): We don't test this when the next-solver is enabled by default.
+    if option_env!("CFG_DEFAULT_NEXT_SOLVER_GLOBALLY").is_none() {
+        tracked!(next_solver, NextSolverConfig { coherence: true, globally: true });
+    }
+    // tidy-alphabetical-start
     tracked!(no_generate_arange_section, true);
     tracked!(no_link, true);
     tracked!(no_profiler_runtime, true);
