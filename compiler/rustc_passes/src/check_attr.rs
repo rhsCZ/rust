@@ -28,9 +28,12 @@ use rustc_hir::{
     GenericParamKind, HirId, Item, ItemKind, MethodKind, Mod, Node, ParamName, Target, TraitItem,
     find_attr,
 };
+use rustc_lint_defs::builtin::{
+    CONFLICTING_REPR_HINTS, INVALID_DOC_ATTRIBUTES, MALFORMED_DIAGNOSTIC_ATTRIBUTES,
+    MALFORMED_DIAGNOSTIC_FORMAT_LITERALS, MISPLACED_DIAGNOSTIC_ATTRIBUTES, UNUSED_ATTRIBUTES,
+};
 use rustc_macros::Diagnostic;
 use rustc_middle::hir::nested_filter;
-use rustc_middle::middle::resolve_bound_vars::ObjectLifetimeDefault;
 use rustc_middle::query::Providers;
 use rustc_middle::traits::ObligationCause;
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
@@ -38,11 +41,6 @@ use rustc_middle::ty::{self, TyCtxt, TypingMode, Unnormalized};
 use rustc_middle::{bug, span_bug};
 use rustc_session::config::CrateType;
 use rustc_session::diagnostics::feature_err;
-use rustc_session::lint;
-use rustc_session::lint::builtin::{
-    CONFLICTING_REPR_HINTS, INVALID_DOC_ATTRIBUTES, MALFORMED_DIAGNOSTIC_ATTRIBUTES,
-    MALFORMED_DIAGNOSTIC_FORMAT_LITERALS, MISPLACED_DIAGNOSTIC_ATTRIBUTES, UNUSED_ATTRIBUTES,
-};
 use rustc_span::edition::Edition;
 use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw, sym};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
@@ -195,9 +193,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             AttributeKind::Deprecated { span: attr_span, .. } => {
                 self.check_deprecated(hir_id, *attr_span, target)
             }
-            AttributeKind::RustcDumpObjectLifetimeDefaults => {
-                self.check_dump_object_lifetime_defaults(hir_id);
-            }
             AttributeKind::Naked(..) => self.check_naked(hir_id, target),
             AttributeKind::NonExhaustive(attr_span) => {
                 self.check_non_exhaustive(*attr_span, span, target, item)
@@ -337,6 +332,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             AttributeKind::RustcDumpInferredOutlives => (),
             AttributeKind::RustcDumpItemBounds => (),
             AttributeKind::RustcDumpLayout(..) => (),
+            AttributeKind::RustcDumpObjectLifetimeDefaults => (),
             AttributeKind::RustcDumpSymbolName(..) => (),
             AttributeKind::RustcDumpUserArgs => (),
             AttributeKind::RustcDumpVariances => (),
@@ -782,23 +778,6 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
                 }
             }
             _ => {}
-        }
-    }
-
-    /// Debugging aid for the `object_lifetime_default` query.
-    fn check_dump_object_lifetime_defaults(&self, hir_id: HirId) {
-        let tcx = self.tcx;
-        let Some(owner_id) = hir_id.as_owner() else { return };
-        for param in &tcx.generics_of(owner_id.def_id).own_params {
-            let ty::GenericParamDefKind::Type { .. } = param.kind else { continue };
-            let default = tcx.object_lifetime_default(param.def_id);
-            let repr = match default {
-                ObjectLifetimeDefault::Empty => "Empty".to_owned(),
-                ObjectLifetimeDefault::Static => "'static".to_owned(),
-                ObjectLifetimeDefault::Param(def_id) => tcx.item_name(def_id).to_string(),
-                ObjectLifetimeDefault::Ambiguous => "Ambiguous".to_owned(),
-            };
-            tcx.dcx().span_err(tcx.def_span(param.def_id), repr);
         }
     }
 
@@ -1587,7 +1566,7 @@ impl<'tcx> CheckAttrVisitor<'tcx> {
             };
 
             self.tcx.emit_node_span_lint(
-                lint::builtin::UNUSED_ATTRIBUTES,
+                UNUSED_ATTRIBUTES,
                 hir_id,
                 no_mangle_span,
                 diagnostics::MixedExportNameAndNoMangle {
