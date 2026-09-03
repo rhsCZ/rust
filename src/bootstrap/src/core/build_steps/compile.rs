@@ -21,7 +21,7 @@ use tracing::span;
 
 use crate::core::backend::CodegenBackendKind;
 use crate::core::build_steps::gcc::{Gcc, GccOutput, GccTargetPair};
-use crate::core::build_steps::llvm::{LlvmFromCi, prebuilt_llvm_output};
+use crate::core::build_steps::llvm::{LlvmFromCi, LlvmKind, prebuilt_llvm_output};
 use crate::core::build_steps::tool::{RustcPrivateCompilers, SourceType, copy_lld_artifacts};
 use crate::core::build_steps::{dist, llvm};
 use crate::core::builder::{
@@ -33,7 +33,7 @@ use crate::core::config::toml::target::DefaultLinuxLinkerOverride;
 use crate::core::config::{
     Allocator, CompilerBuiltins, DebuginfoLevel, LlvmLibunwind, RustcLto, TargetSelection,
 };
-use crate::core::session::{CLang, DependencyType, FileType, GitRepo, Mode};
+use crate::core::session::{CLang, DependencyType, FileType, Mode};
 use crate::utils::build_stamp;
 use crate::utils::build_stamp::BuildStamp;
 use crate::utils::exec::command;
@@ -1912,7 +1912,7 @@ pub fn compiler_file(
     }
     let mut cmd = command(compiler);
     cmd.args(builder.cc_handled_cflags(target, c));
-    cmd.args(builder.cc_unhandled_cflags(target, GitRepo::Rustc, c));
+    cmd.args(builder.cc_unhandled_cflags(target, c));
     cmd.arg(format!("-print-file-name={file}"));
     let out = cmd.run_capture_stdout(builder).stdout();
     PathBuf::from(out.trim())
@@ -2201,7 +2201,7 @@ impl CommandLineStep for Assemble {
 
                     if !src_path.exists() {
                         // When using `download-ci-llvm`, some of the tools may not exist, so skip trying to copy them.
-                        if builder.config.llvm_ci_mode.download_from_ci() {
+                        if llvm_output.kind() == LlvmKind::DownloadedFromCi {
                             eprintln!("{} does not exist; skipping copy", src_path.display());
                             continue;
                         }
