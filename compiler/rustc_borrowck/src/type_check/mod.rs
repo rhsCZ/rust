@@ -17,7 +17,6 @@ use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_infer::infer::region_constraints::RegionConstraintData;
 use rustc_infer::infer::{
     BoundRegionConversionTime, InferCtxt, NllRegionVariableOrigin, RegionVariableOrigin,
-    SolverRegionConstraint,
 };
 use rustc_infer::traits::{Obligation, ObligationCause, PredicateObligations};
 use rustc_middle::bug;
@@ -114,7 +113,6 @@ pub(crate) fn type_check<'tcx>(
         outlives_constraints: OutlivesConstraintSet::default(),
         type_tests: Vec::default(),
         universe_causes: FxIndexMap::default(),
-        solver_constraints: SolverRegionConstraint::new_true(),
     };
 
     let CreateResult {
@@ -135,13 +133,6 @@ pub(crate) fn type_check<'tcx>(
         assert!(
             pre_assumptions.is_empty(),
             "there should be no incoming region assumptions = {pre_assumptions:#?}",
-        );
-        // Solver region constraints from computing the implied bounds went through
-        // `ConstraintConversion` and are already stored in `constraints`.
-        let pre_solver_constraints = infcx.take_solver_region_constraints();
-        assert!(
-            pre_solver_constraints.is_true(),
-            "there should be no incoming solver region constraints = {pre_solver_constraints:#?}",
         );
     }
 
@@ -183,10 +174,6 @@ pub(crate) fn type_check<'tcx>(
     let polonius_context = typeck.polonius_context;
 
     if infcx.tcx.assumptions_on_binders() {
-        let solver_constraints = mem::replace(
-            &mut typeck.constraints.solver_constraints,
-            SolverRegionConstraint::new_true(),
-        );
         let mut converter = constraint_conversion::ConstraintConversion::new(
             typeck.infcx,
             typeck.universal_regions,
@@ -198,7 +185,6 @@ pub(crate) fn type_check<'tcx>(
             typeck.constraints,
         );
         typeck.infcx.destructure_solver_region_constraints_for_borrowck(
-            solver_constraints,
             &mut converter,
             typeck.known_type_outlives_obligations,
             typeck.region_bound_pairs,
@@ -308,25 +294,9 @@ pub(crate) struct MirTypeckRegionConstraints<'tcx> {
     pub(crate) universe_causes: FxIndexMap<ty::UniverseIndex, UniverseInfo<'tcx>>,
 
     pub(crate) type_tests: Vec<TypeTest<'tcx>>,
-
-    /// The region constraints emitted by the next solver under
-    /// `-Zassumptions-on-binders`. Unlike the constraints above these are not yet
-    /// lowered to NLL, we destructure them into `outlives_constraints` at the end
-    /// of MIR type checking.
-    pub(crate) solver_constraints: SolverRegionConstraint<'tcx>,
 }
 
 impl<'tcx> MirTypeckRegionConstraints<'tcx> {
-    /// Adds `constraint` to the constraints we've accumulated so far.
-    pub(crate) fn register_solver_constraint(&mut self, constraint: SolverRegionConstraint<'tcx>) {
-        // FIXME(-Zassumptions-on-binders): This is pretty bad for perf, we rebuild the
-        // entire constraint every time instead of updating it incrementally.
-        self.solver_constraints = SolverRegionConstraint::build_and(
-            constraint,
-            mem::replace(&mut self.solver_constraints, SolverRegionConstraint::new_true()),
-        );
-    }
-
     /// Creates a `Region` for a given `PlaceholderRegion`, or returns the
     /// region that corresponds to a previously created one.
     pub(crate) fn placeholder_region(
@@ -2628,8 +2598,11 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
                 let Some(src_field) = src_fields.iter().find(|f| f.name == dst_field.name) else {
                     continue;
                 };
-                let dst_ty = dst_field.ty(tcx, dst_args).skip_norm_wip();
-                let src_ty = src_field.ty(tcx, src_args).skip_norm_wip();
+                // These field types can still contain projections from the source or target type
+                // and normalize them before handing them to `NllTypeRelating`
+                let dst_ty = self.normalize(dst_field.ty(tcx, dst_args), location.to_locations());
+                let src_ty = self.normalize(src_field.ty(tcx, src_args), location.to_locations());
+
                 if let (
                     ty::Ref(src_region, _, Mutability::Mut),
                     ty::Ref(dst_region, _, Mutability::Not),
