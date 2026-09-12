@@ -1,5 +1,6 @@
-use rustc_ast::token::{Delimiter, TokenKind};
-use rustc_ast::tokenstream::{DelimSpacing, DelimSpan, Spacing, TokenStream, TokenTree};
+use rustc_ast::token::{Delimiter, Token, TokenKind};
+use rustc_ast::tokenarena::{ArenaTokenStreamBuilder, DelimitedData};
+use rustc_ast::tokenstream::{DelimSpacing, DelimSpan, Spacing};
 use rustc_ast::{
     AttrKind, Attribute, DUMMY_NODE_ID, EiiDecl, EiiImpl, ItemKind, MetaItem, Mutability, Path,
     StmtKind, SyntheticAttr, Visibility, ast,
@@ -351,13 +352,7 @@ fn generate_default_impl(
     let anon_mod = |span: Span, stmts: ThinVec<ast::Stmt>| {
         let unit = ecx.ty(item_span, ast::TyKind::Tup(ThinVec::new()));
         let underscore = Ident::new(kw::Underscore, item_span);
-        ecx.item_const(
-            span,
-            underscore,
-            unit,
-            Some(ecx.expr_block(ecx.block(span, stmts))),
-            ast::ConstItemKind::Body,
-        )
+        ecx.item_const(span, underscore, unit, Some(ecx.expr_block(ecx.block(span, stmts))))
     };
 
     // const _: () = {
@@ -498,21 +493,21 @@ fn generate_attribute_macro_to_implement(
                 body: Box::new(ast::DelimArgs {
                     dspan: DelimSpan::from_single(span),
                     delim: Delimiter::Brace,
-                    tokens: TokenStream::from_iter([
-                        TokenTree::Delimited(
-                            DelimSpan::from_single(span),
-                            DelimSpacing::new(Spacing::Alone, Spacing::Alone),
-                            Delimiter::Parenthesis,
-                            TokenStream::default(),
-                        ),
-                        TokenTree::token_alone(TokenKind::FatArrow, span),
-                        TokenTree::Delimited(
-                            DelimSpan::from_single(span),
-                            DelimSpacing::new(Spacing::Alone, Spacing::Alone),
-                            Delimiter::Brace,
-                            TokenStream::default(),
-                        ),
-                    ]),
+                    tokens: {
+                        let mut builder = ArenaTokenStreamBuilder::with_capacity(3);
+                        builder.empty_delimited(DelimitedData {
+                            span: DelimSpan::from_single(span),
+                            spacing: DelimSpacing::new(Spacing::Alone, Spacing::Alone),
+                            delimiter: Delimiter::Parenthesis,
+                        });
+                        builder.push_token_alone(Token::new(TokenKind::FatArrow, span));
+                        builder.empty_delimited(DelimitedData {
+                            span: DelimSpan::from_single(span),
+                            spacing: DelimSpacing::new(Spacing::Alone, Spacing::Alone),
+                            delimiter: Delimiter::Brace,
+                        });
+                        builder.finish()
+                    },
                 }),
                 macro_rules: false,
                 // #[eii_declaration(foreign_item_ident)]

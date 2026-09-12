@@ -5,7 +5,8 @@ use ast::token::IdentIsRaw;
 use rustc_ast as ast;
 use rustc_ast::ast::*;
 use rustc_ast::token::{self, Delimiter, MetaVarKind, TokenKind};
-use rustc_ast::tokenstream::{DelimSpan, TokenStream, TokenTree};
+use rustc_ast::tokenarena::{ArenaTokenStream, ArenaTokenTree};
+use rustc_ast::tokenstream::DelimSpan;
 use rustc_ast::util::case::Case;
 use rustc_ast_pretty::pprust;
 use rustc_errors::codes::*;
@@ -328,7 +329,6 @@ impl<'a> Parser<'a> {
                 generics,
                 ty,
                 body,
-                kind: ConstItemKind::Body,
                 define_opaque: None,
             }))
         } else if let Some(kind) = self.is_reuse_item() {
@@ -339,27 +339,8 @@ impl<'a> Parser<'a> {
             // MODULE ITEM
             self.parse_item_mod(attrs)?
         } else if self.eat_keyword_case(exp!(Type), case) {
-            if let Const::Yes(const_span) = self.parse_constness(case) {
-                // TYPE CONST (mgca)
-                self.recover_const_mut(const_span);
-                self.recover_missing_kw_before_item()?;
-                let (ident, generics, ty, body) = self.parse_const_item(const_span)?;
-                // Make sure this is only allowed if the feature gate is enabled.
-                // #![feature(mgca_type_const_syntax)]
-                self.psess.gated_spans.gate(sym::mgca_type_const_syntax, lo.to(const_span));
-                ItemKind::Const(Box::new(ConstItem {
-                    defaultness: def_(),
-                    ident,
-                    generics,
-                    ty,
-                    body,
-                    kind: ConstItemKind::TypeConst,
-                    define_opaque: None,
-                }))
-            } else {
-                // TYPE ITEM
-                self.parse_type_alias(def_())?
-            }
+            // TYPE ITEM
+            self.parse_type_alias(def_())?
         } else if self.eat_keyword_case(exp!(Enum), case) {
             // ENUM ITEM
             self.parse_item_enum()?
@@ -1116,7 +1097,7 @@ impl<'a> Parser<'a> {
             SUFFIXES.iter().any(|suffix| {
                 suffix.iter().enumerate().all(|(i, kw)| {
                     self.tree_look_ahead(i + 2, |t| {
-                        if let TokenTree::Token(token, _) = t {
+                        if let ArenaTokenTree::Token(token, _) = t {
                             token.is_keyword(*kw)
                         } else {
                             false
@@ -1268,7 +1249,6 @@ impl<'a> Parser<'a> {
                                 generics: Generics::default(),
                                 ty,
                                 body: expr,
-                                kind: ConstItemKind::Body,
                                 define_opaque,
                             }))
                         }
@@ -1661,7 +1641,7 @@ impl<'a> Parser<'a> {
         // might be a metavariable i.e. an invisible-delimited sequence, and
         // `tree_look_ahead` will consider that a single element when looking
         // ahead.
-        self.tree_look_ahead(n, |t| matches!(t, TokenTree::Delimited(_, _, Delimiter::Brace, _)))
+        self.tree_look_ahead(n, |t| matches!(t, ArenaTokenTree::DelimitedStart(_, data) if matches!(data.delimiter, Delimiter::Brace)))
             == Some(true)
     }
 
@@ -2601,8 +2581,9 @@ impl<'a> Parser<'a> {
             let body = self.parse_token_tree(); // `MacBody`
             // Convert `MacParams MacBody` into `{ MacParams => MacBody }`.
             let bspan = body.span();
-            let arrow = TokenTree::token_alone(token::FatArrow, pspan.between(bspan)); // `=>`
-            let tokens = TokenStream::new(vec![params, arrow, body]);
+            let arrow = ArenaTokenTree::token_alone(token::FatArrow, pspan.between(bspan)); // `=>`
+            let tokens =
+                ArenaTokenStream::new_reparented(&[params, arrow, body], &self.token_cursor.stream);
             let dspan = DelimSpan::from_pair(pspan.shrink_to_lo(), bspan.shrink_to_hi());
             Box::new(DelimArgs { dspan, delim: Delimiter::Brace, tokens })
         } else {
