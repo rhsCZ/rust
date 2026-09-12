@@ -1,6 +1,7 @@
 mod context;
 
 use rustc_ast::token::Delimiter;
+use rustc_ast::tokenarena::ArenaTokenStream;
 use rustc_ast::tokenstream::{DelimSpan, TokenStream};
 use rustc_ast::{DelimArgs, Expr, ExprKind, MacCall, Path, PathSegment, UnOp, token};
 use rustc_ast_pretty::pprust;
@@ -58,7 +59,7 @@ pub(crate) fn expand_assert<'cx>(
                 args: Box::new(DelimArgs {
                     dspan: DelimSpan::from_single(call_site_span),
                     delim: Delimiter::Parenthesis,
-                    tokens,
+                    tokens: ArenaTokenStream::from_stream(&tokens),
                 }),
             })),
         );
@@ -110,7 +111,7 @@ fn expr_if_not(
 }
 
 fn parse_assert<'a>(cx: &ExtCtxt<'a>, sp: Span, stream: TokenStream) -> PResult<'a, Assert> {
-    let mut parser = cx.new_parser_from_tts(stream);
+    let mut parser = cx.new_parser_from_tts(ArenaTokenStream::from_stream(&stream));
 
     if parser.token == token::Eof {
         return Err(cx.dcx().create_err(diagnostics::AssertRequiresBoolean { span: sp }));
