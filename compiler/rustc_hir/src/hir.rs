@@ -1405,6 +1405,16 @@ impl<'tcx> OwnerInfo<'tcx> {
     pub fn node(&self) -> OwnerNode<'tcx> {
         self.nodes.node()
     }
+
+    // A fingerprint that identifies the contents of the OwnerInfo.
+    // It only depends on `nodes` and `attrs` because `parenting` and `trait_map` are
+    // deterministically calculated from `nodes` and `attrs`.
+    #[inline]
+    pub fn fingerprint(&self) -> Fingerprint {
+        let body = self.nodes.opt_hash.expect("HIR hash requested without needs_hir_hash");
+        let attrs = self.attrs.opt_hash.expect("HIR hash requested without needs_hir_hash");
+        body.combine(attrs)
+    }
 }
 
 #[derive(Copy, Clone, Debug, StableHash)]
@@ -3093,7 +3103,7 @@ pub enum ImplItemKind<'hir> {
 /// * the `G<Ty> = Ty` in `Trait<G<Ty> = Ty>`
 /// * the `A: Bound` in `Trait<A: Bound>`
 /// * the `RetTy` in `Trait(ArgTy, ArgTy) -> RetTy`
-/// * the `C = { Ct }` in `Trait<C = { Ct }>` (feature `min_generic_const_args`)
+/// * the `C = { Ct }` in `Trait<C = { Ct }>` (feature `gca_min_const_items`)
 /// * the `f(..): Bound` in `Trait<f(..): Bound>` (feature `return_type_notation`)
 #[derive(Debug, Clone, Copy, StableHash)]
 pub struct AssocItemConstraint<'hir> {
