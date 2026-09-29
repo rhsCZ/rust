@@ -12,6 +12,7 @@ use std::debug_assert_matches;
 use std::mem::{replace, swap, take};
 use std::ops::{ControlFlow, Range};
 
+use rustc_ast::attr::AttributeExt;
 use rustc_ast::visit::{
     AssocCtxt, BoundKind, FnCtxt, FnKind, Visitor, try_visit, visit_opt, walk_list,
 };
@@ -923,7 +924,7 @@ impl<'ast, 'ra, 'tcx> Visitor<'ast> for LateResolutionVisitor<'_, 'ast, 'ra, 'tc
         let prev = self.diag_metadata.current_trait_object;
         let prev_ty = self.diag_metadata.current_type_path;
         match &ty.kind {
-            TyKind::Ref(None, _) | TyKind::PinnedRef(None, _) => {
+            TyKind::Ref(None, ..) | TyKind::PinnedRef(None, ..) => {
                 // Elided lifetime in reference: we resolve as if there was some lifetime `'_` with
                 // NodeId `ty.id`.
                 // This span will be used in case of elision failure.
@@ -2116,8 +2117,8 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
                 type Result = ControlFlow<Span>;
 
                 fn visit_ty(&mut self, ty: &'ast ast::Ty) -> Self::Result {
-                    if let ast::TyKind::Ref(None, mut_ty) = &ty.kind {
-                        return ControlFlow::Break(mut_ty.ty.span.shrink_to_lo());
+                    if let ast::TyKind::Ref(None, inner_ty, _) = &ty.kind {
+                        return ControlFlow::Break(inner_ty.span.shrink_to_lo());
                     }
                     visit::walk_ty(self, ty)
                 }
@@ -2656,7 +2657,7 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
         impl<'ra> Visitor<'ra> for FindReferenceVisitor<'_, '_, '_> {
             fn visit_ty(&mut self, ty: &'ra Ty) {
                 trace!("FindReferenceVisitor considering ty={:?}", ty);
-                if let TyKind::Ref(lt, _) | TyKind::PinnedRef(lt, _) = ty.kind {
+                if let TyKind::Ref(lt, ..) | TyKind::PinnedRef(lt, ..) = ty.kind {
                     // See if anything inside the &thing contains Self
                     let mut visitor =
                         SelfVisitor { r: self.r, impl_self: self.impl_self, self_found: false };
@@ -2860,10 +2861,22 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
     }
 
     fn resolve_item(&mut self, item: &'ast Item) {
-        let mod_inner_docs =
-            matches!(item.kind, ItemKind::Mod(..)) && rustdoc::inner_docs(&item.attrs);
-        if !mod_inner_docs && !matches!(item.kind, ItemKind::Impl(..) | ItemKind::Use(..)) {
-            self.resolve_doc_links(&item.attrs, MaybeExported::Ok(item.id));
+        match item.kind {
+            ItemKind::Mod(..) => {
+                // We only handle outer doc comments for modules here.
+                let attrs = if let Some(pos) = item.attrs.iter().position(|a| {
+                    a.doc_resolution_scope().is_some_and(|style| style == AttrStyle::Inner)
+                }) {
+                    &item.attrs[..pos]
+                } else {
+                    &item.attrs
+                };
+                self.resolve_doc_links(attrs, MaybeExported::Ok(item.id));
+            }
+            ItemKind::Impl(..) | ItemKind::Use(..) => {}
+            _ => {
+                self.resolve_doc_links(&item.attrs, MaybeExported::Ok(item.id));
+            }
         }
 
         debug!("(resolving item) resolving {:?} ({:?})", item.kind.ident(), item.kind);
@@ -2957,9 +2970,16 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
                 let orig_module = replace(&mut self.parent_scope.module, module);
                 self.with_rib(ValueNS, RibKind::Module(module.expect_local()), |this| {
                     this.with_rib(TypeNS, RibKind::Module(module.expect_local()), |this| {
-                        if mod_inner_docs {
-                            this.resolve_doc_links(&item.attrs, MaybeExported::Ok(item.id));
-                        }
+                        // Outer doc comments were already handled above, now we handle
+                        // inner doc comments.
+                        let attrs = if let Some(pos) = item.attrs.iter().position(|a| {
+                            a.doc_resolution_scope().is_some_and(|style| style == AttrStyle::Inner)
+                        }) {
+                            &item.attrs[pos..]
+                        } else {
+                            &[]
+                        };
+                        this.resolve_doc_links(attrs, MaybeExported::Ok(item.id));
                         let old_macro_rules = this.parent_scope.macro_rules;
                         visit::walk_item(this, item);
                         // Maintain macro_rules scopes in the same way as during early resolution
@@ -5232,7 +5252,7 @@ impl<'a, 'ast, 'ra, 'tcx> LateResolutionVisitor<'a, 'ast, 'ra, 'tcx> {
             AnonConstKind::InlineConst => ConstantHasGenerics::Yes,
             AnonConstKind::ConstArg(_) | AnonConstKind::ArrayLength => {
                 if self.r.features.generic_const_exprs()
-                    || self.r.features.gca_min_const_items()
+                    || self.r.features.gca()
                     || is_trivial_const_arg
                 {
                     ConstantHasGenerics::Yes
