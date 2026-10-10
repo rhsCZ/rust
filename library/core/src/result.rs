@@ -544,7 +544,7 @@
 use crate::iter::{self, FusedIterator, TrustedLen};
 use crate::marker::Destruct;
 use crate::ops::{self, ControlFlow, Deref, DerefMut};
-use crate::{fmt, hint};
+use crate::{fmt, hint, mem};
 
 /// `Result` is a type that represents either success ([`Ok`]) or failure ([`Err`]).
 ///
@@ -1181,7 +1181,8 @@ impl<T, E> Result<T, E> {
     {
         match self {
             Ok(t) => t,
-            Err(e) => unwrap_failed(msg, &e),
+            // SAFETY: `unwrap_failed` will drop `e`, but we won't use it again
+            Err(e) => unsafe { unwrap_failed(msg, &mut mem::ManuallyDrop::new(e)) },
         }
     }
 
@@ -1229,7 +1230,13 @@ impl<T, E> Result<T, E> {
     {
         match self {
             Ok(t) => t,
-            Err(e) => unwrap_failed("called `Result::unwrap()` on an `Err` value", &e),
+            // SAFETY: `unwrap_failed` will drop `e`, but we won't use it again
+            Err(e) => unsafe {
+                unwrap_failed(
+                    "called `Result::unwrap()` on an `Err` value",
+                    &mut mem::ManuallyDrop::new(e),
+                )
+            },
         }
     }
 
@@ -1294,7 +1301,8 @@ impl<T, E> Result<T, E> {
         T: fmt::Debug,
     {
         match self {
-            Ok(t) => unwrap_failed(msg, &t),
+            // SAFETY: `unwrap_failed` will drop `t`, but we won't use it again
+            Ok(t) => unsafe { unwrap_failed(msg, &mut mem::ManuallyDrop::new(t)) },
             Err(e) => e,
         }
     }
@@ -1325,7 +1333,13 @@ impl<T, E> Result<T, E> {
         T: fmt::Debug,
     {
         match self {
-            Ok(t) => unwrap_failed("called `Result::unwrap_err()` on an `Ok` value", &t),
+            // SAFETY: `unwrap_failed` will drop `t`, but we won't use it again
+            Ok(t) => unsafe {
+                unwrap_failed(
+                    "called `Result::unwrap_err()` on an `Ok` value",
+                    &mut mem::ManuallyDrop::new(t),
+                )
+            },
             Err(e) => e,
         }
     }
@@ -1858,12 +1872,20 @@ impl<T, E> Result<Result<T, E>, E> {
 }
 
 // This is a separate function to reduce the code size of the methods
+//
+// Take the error via `&mut ManuallyDrop` so that we are responsible for dropping it rather than the
+// coller. This reduces the code size of `unwrap` because it does not need to include a landing pad
+// to drop the error in case of a panic.
+//
+// SAFETY: This function drops `error`, so it must not be used again or exposed to safe code.
 #[cfg(not(panic = "immediate-abort"))]
 #[inline(never)]
 #[cold]
 #[track_caller]
-fn unwrap_failed(msg: &str, error: &dyn fmt::Debug) -> ! {
-    panic!("{msg}: {error:?}");
+unsafe fn unwrap_failed(msg: &str, error: &mut mem::ManuallyDrop<dyn fmt::Debug + '_>) -> ! {
+    // SAFETY: we (and the caller) won't use `e` after dropping it
+    let error = mem::DropGuard::new(error, |e| unsafe { mem::ManuallyDrop::drop(e) });
+    panic!("{msg}: {:?}", &***error);
 }
 
 // This is a separate function to avoid constructing a `dyn Debug`
@@ -1874,7 +1896,7 @@ fn unwrap_failed(msg: &str, error: &dyn fmt::Debug) -> ! {
 #[inline]
 #[cold]
 #[track_caller]
-const fn unwrap_failed<T>(_msg: &str, _error: &T) -> ! {
+const unsafe fn unwrap_failed<T>(_msg: &str, _error: T) -> ! {
     panic!()
 }
 
