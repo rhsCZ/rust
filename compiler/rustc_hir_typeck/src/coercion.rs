@@ -54,7 +54,10 @@ use rustc_middle::ty::adjustment::{
     PointerCoercion,
 };
 use rustc_middle::ty::error::TypeError;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt, Unnormalized};
+use rustc_middle::ty::{
+    self, Ty, TyCtxt, TypeSuperVisitable, TypeVisitable, TypeVisitableExt, TypeVisitor,
+    Unnormalized,
+};
 use rustc_span::{BytePos, DUMMY_SP, Span, span_bug};
 use rustc_trait_selection::infer::InferCtxtExt as _;
 use rustc_trait_selection::solve::inspect::{self, InferCtxtProofTreeExt, ProofTreeVisitor};
@@ -557,6 +560,10 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
         debug_assert!(self.shallow_resolve(source) == source);
         debug_assert!(self.shallow_resolve(target) == target);
 
+        // Coercion is one of the most common operations that we do in typeck,
+        // because it happens at every assignment and call arg (among other
+        // positions). So it's worth returning early on some common cases.
+
         // We don't apply any coercions incase either the source or target
         // aren't sufficiently well known but tend to instead just equate
         // them both.
@@ -569,10 +576,30 @@ impl<'f, 'tcx> Coerce<'f, 'tcx> {
             return Err(TypeError::Mismatch);
         }
 
-        // This is an optimization because coercion is one of the most common
-        // operations that we do in typeck, since it happens at every assignment
-        // and call arg (among other positions).
-        //
+        struct HasDyn;
+
+        impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for HasDyn {
+            type Result = ControlFlow<()>;
+
+            fn visit_ty(&mut self, t: Ty<'tcx>) -> Self::Result {
+                match t.kind() {
+                    ty::Dynamic(..) => return ControlFlow::Break(()),
+                    _ => t.super_visit_with(self),
+                }
+            }
+        }
+
+        fn has_dyn(t: Ty<'_>) -> bool {
+            t.visit_with(&mut HasDyn).is_break()
+        }
+
+        // If the types are equal and don't contain `dyn` (either directly or
+        // indirectly via an alias) we can early return with `Err` because
+        // that's what the slow-path code below would return.
+        if source == target && !source.has_aliases() && !has_dyn(source) {
+            return Err(TypeError::Mismatch);
+        }
+
         // These targets are known to never be RHS in `LHS: CoerceUnsized<RHS>`.
         // That's because these are built-in types for which a core-provided impl
         // doesn't exist, and for which a user-written impl is invalid.
