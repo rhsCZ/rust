@@ -521,6 +521,8 @@ declare_features! (
     (incomplete, explicit_tail_calls, "1.72.0", Some(112788)),
     /// Allows using `#[export_stable]` which indicates that an item is exportable.
     (incomplete, export_stable, "1.88.0", Some(139939)),
+    /// Externally implementable items with default impls
+    (incomplete, extern_item_default_impls, "CURRENT_RUSTC_VERSION", Some(125418)),
     /// Externally implementable items
     (incomplete, extern_item_impls, "1.94.0", Some(125418)),
     /// Allows defining `extern type`s.
@@ -769,6 +771,8 @@ declare_features! (
     /// Allows creation of instances of a struct by moving fields that have
     /// not changed from prior instances of the same struct (RFC #2528)
     (unstable, type_changing_struct_update, "1.58.0", Some(86555)),
+    /// Allows using reflection features
+    (unstable, type_info, "1.94.0", Some(146922)),
     /// Allows using `_ = <range-or-int>` enum variants.
     (incomplete, unnamed_enum_variants, "1.98.0", Some(156628)),
     /// Allows using `unsafe<'a> &'a T` unsafe binder types.
