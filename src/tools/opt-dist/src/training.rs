@@ -14,6 +14,12 @@ fn init_compiler_benchmarks(
     scenarios: &[&str],
     crates: &[&str],
 ) -> CmdBuilder {
+    // If we're currently trying to optimize cargo, we need to run benchmarks with the
+    // PGO-instrumented binary we just built to actually gather the profiles: the stage2 cargo.
+    // Otherwise, running the benchmarks using the beta/stage0 cargo is enough.
+    let benchmark_cargo =
+        if env.optimize_cargo { env.cargo_stage_2() } else { env.cargo_stage_0() };
+
     // Run rustc-perf benchmarks
     // Benchmark using profile_local with eprintln, which essentially just means
     // don't actually benchmark -- just make sure we run rustc a bunch of times.
@@ -31,7 +37,7 @@ fn init_compiler_benchmarks(
         "--id",
         "Test",
         "--cargo",
-        env.cargo_stage_2().as_str(),
+        benchmark_cargo.as_str(),
         "--profiles",
         profiles.join(",").as_str(),
         "--scenarios",
@@ -64,6 +70,8 @@ enum LlvmProfdata {
     Host,
     /// Use llvm-profdata from the target toolchain (i.e. from LLVM built from `src/llvm-project`).
     Target,
+    /// Use llvm-profdata from the target toolchain built by CI, when not building LLVM.
+    CI,
 }
 
 fn merge_llvm_profiles(
@@ -80,6 +88,10 @@ fn merge_llvm_profiles(
             .build_artifacts()
             .join("llvm")
             .join("build")
+            .join(format!("bin/llvm-profdata{}", executable_extension())),
+        LlvmProfdata::CI => env
+            .build_artifacts()
+            .join("ci-llvm")
             .join(format!("bin/llvm-profdata{}", executable_extension())),
     };
 
@@ -219,7 +231,15 @@ pub fn gather_pgo_profiles(
     let merged_profile = env.artifact_dir().join(format!("{name}-pgo.profdata"));
     log::info!("Merging {name} PGO profiles to {merged_profile}");
 
-    let llvm_profdata = if env.build_llvm() { LlvmProfdata::Target } else { LlvmProfdata::Host };
+    // When not building LLVM with opt-dist, we use download-ci-llvm, and thus need CI's
+    // llvm-profdata. Otherwise the host will be used, on the target's profiles... A big no no.
+    let llvm_profdata = if env.download_ci_llvm {
+        LlvmProfdata::CI
+    } else if env.build_llvm() {
+        LlvmProfdata::Target
+    } else {
+        LlvmProfdata::Host
+    };
 
     merge_llvm_profiles(env, &merged_profile, profile_root, llvm_profdata)?;
     log_profile_stats(name, &merged_profile, profile_root)?;
