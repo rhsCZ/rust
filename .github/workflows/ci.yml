@@ -104,7 +104,7 @@ jobs:
         include: ${{ fromJSON(needs.calculate_matrix.outputs.jobs) }}
     steps:
       - name: EXPERIMENT
-        shell: pwsh
+        shell: pwsh -Command $ErrorActionPreference='stop'; $PSNativeCommandUseErrorActionPreference=$true; & '{0}'
         run: |
           $installPath=&"${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath -format value
           &"${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe" --installPath $installPath --remove Microsoft.VisualStudio.Component.VC.Tools.ARM64 --remove Microsoft.VisualStudio.Component.VC.Tools.ARM64EC --remove Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --remove Microsoft.VisualStudio.Component.Windows11SDK.28000 --noUpdateInstaller --passive
