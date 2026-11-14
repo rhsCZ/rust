@@ -36,7 +36,7 @@ impl From<&AttrKind> for SimpleAttrKind {
                 SyntheticAttr::TestEntrypoint => Self::TestEntrypoint,
             },
             AttrKind::DocComment(..) => Self::Doc,
-            AttrKind::Generated(generated) => Self::Normal(generated.path().iter().copied().collect()),
+            AttrKind::Generated(generated) => Self::Normal(generated.path().to_vec()),
         }
     }
 }
