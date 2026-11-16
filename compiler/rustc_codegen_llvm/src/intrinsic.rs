@@ -589,7 +589,7 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                     &[args[0].immediate(), args[1].immediate(), args[2].immediate()],
                 );
                 // Some targets have `memcmp` returning `i16`, but the intrinsic is always `i32`.
-                self.sext(cmp, self.type_ix(32))
+                self.sext(cmp, self.type_i32())
             }
 
             sym::black_box => {
@@ -828,8 +828,7 @@ impl<'ll, 'tcx> IntrinsicCallBuilderMethods<'tcx> for Builder<'_, 'll, 'tcx> {
                         self.const_null(ty)
                     }
                     _ => {
-                        let ty = self.type_ix(32);
-                        let val = self.const_int(ty, 0);
+                        let val = self.const_i32(0);
 
                         let type_params: &[Type<'ll>] =
                             if llvm_version < (23, 0, 0) { &[] } else { &[self.type_ptr()] };
@@ -1412,7 +1411,7 @@ fn codegen_msvc_try<'ll, 'tcx>(
         let type_info_vtable = bx.declare_global("??_7type_info@@6B@", bx.type_ptr());
         let type_name = bx.const_bytes(b"rust_panic\0");
         let type_info =
-            bx.const_struct(&[type_info_vtable, bx.const_null(bx.type_ptr()), type_name], false);
+            bx.const_struct(&[type_info_vtable, bx.const_null(bx.type_ptr()), type_name]);
         let tydesc = bx.declare_global(
             &mangle_internal_symbol(bx.tcx, "__rust_panic_type_info"),
             bx.val_ty(type_info),
@@ -1696,7 +1695,7 @@ fn get_rust_try_fn<'a, 'll, 'tcx>(
 
     if cx.sess().pointer_authentication() {
         let cfg = cx.sess().pointer_auth_config.as_ref().unwrap();
-        let attrs: Vec<&Attribute> =
+        let attrs: Vec<Attribute<'ll>> =
             cfg.fn_attrs().into_iter().map(|name| llvm::CreateAttrString(cx.llcx, name)).collect();
 
         let (_ty, rust_try_fn) = rust_try;
@@ -3298,7 +3297,7 @@ fn generic_simd_intrinsic<'ll, 'tcx>(
             sym::simd_bswap if int_size == 8 => Ok(args[0].immediate()),
             sym::simd_ctlz | sym::simd_cttz => {
                 // for the (int, i1 immediate) pair, the second arg adds `(0, true) => poison`
-                let dont_poison_on_zero = bx.const_int(bx.type_i1(), 0);
+                let dont_poison_on_zero = bx.const_bool(false);
                 Ok(bx.call_intrinsic(
                     llvm_intrinsic,
                     &[vec_ty],
