@@ -15,8 +15,13 @@
 /// to match C `abort()` or otherwise perform a "clean" abort. Instead, it emits
 /// code that will crash the process with as little overhead as possible, such
 /// as a "halt and catch fire" style instruction. You should generally prefer
-/// using `abort` instead except where the absolute minimum overhead is
-/// required.
+/// using `abort` or one of the other options mentioned in [Exiting the current
+/// process], unless absolute minimum overhead is required.
+///
+/// While this function provides an abrupt exit, note that it is still a safe
+/// form of crashing—unlike some uses of the terms "crash" or "trap".
+///
+/// [Exiting the current process]: ../../std/process/index.html#exiting-the-current-process
 ///
 /// # Platform-specific behavior
 ///
