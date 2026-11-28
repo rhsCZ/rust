@@ -71,7 +71,7 @@ pub fn is_min_const_fn<'tcx>(cx: &LateContext<'tcx>, body: &Body<'tcx>, msrv: Ms
         // Cleanup blocks are ignored entirely by const eval, so we can too:
         // https://github.com/rust-lang/rust/blob/1dea922ea6e74f99a0e97de5cdb8174e4dea0444/compiler/rustc_const_eval/src/transform/check_consts/check.rs#L382
         if !bb.is_cleanup {
-            check_terminator(cx, body, bb.terminator(), msrv)?;
+            check_terminator(cx, body, &bb.terminator, msrv)?;
             for stmt in &bb.statements {
                 check_statement(cx, body, def_id, stmt, msrv)?;
             }
@@ -181,9 +181,10 @@ fn check_rvalue<'tcx>(
                 // We cannot allow this for now.
                 return Err((span, "unsizing casts are only allowed for references right now".into()));
             };
-            let unsized_ty = cx
-                .tcx
-                .struct_tail_for_codegen(pointee_ty, ty::TypingEnv::post_analysis_no_rigid_aliases(cx.tcx, def_id));
+            let unsized_ty = cx.tcx.struct_tail_for_codegen(
+                pointee_ty,
+                ty::TypingEnv::post_analysis_no_rigid_aliases(cx.tcx, def_id),
+            );
             if let ty::Slice(_) | ty::Str = unsized_ty.kind() {
                 check_operand(cx, op, span, body, msrv)?;
                 // Casting/coercing things to slices is fine.
